@@ -85,6 +85,37 @@ class MyNeuralNetwork:
             -np.sum(y * np.log(y_hat + 1e-8) + (1 - y) * np.log(1 - y_hat + 1e-8)) / n
         )
 
+    def calculate_accuracy(self, y_pred: np.ndarray, y_true: np.ndarray) -> float:
+        """Calculate accuracy as a percentage of correct predictions"""
+        y_pred_binary = (y_pred >= 0.5).astype(int)  # Convert to binary predictions
+        accuracy = np.mean(y_pred_binary == y_true)  # Compare with true labels
+        return accuracy * 100
+
+    def calculate_precision(self, y_pred: np.ndarray, y_true: np.ndarray) -> float:
+        """Calculate precision"""
+        y_pred_binary = (y_pred >= 0.5).astype(int)
+        true_positives = np.sum((y_pred_binary == 1) & (y_true == 1))
+        false_positives = np.sum((y_pred_binary == 1) & (y_true == 0))
+        precision = true_positives / (
+            true_positives + false_positives + 1e-8
+        )  # To avoid division by zero
+        return precision
+
+    def calculate_recall(self, y_pred: np.ndarray, y_true: np.ndarray) -> float:
+        """Calculate recall"""
+        y_pred_binary = (y_pred >= 0.5).astype(int)
+        true_positives = np.sum((y_pred_binary == 1) & (y_true == 1))
+        false_negatives = np.sum((y_pred_binary == 0) & (y_true == 1))
+        recall = true_positives / (true_positives + false_negatives + 1e-8)
+        return recall
+
+    def calculate_f1_score(self, y_pred: np.ndarray, y_true: np.ndarray) -> float:
+        """Calculate F1 score"""
+        precision = self.calculate_precision(y_pred, y_true)
+        recall = self.calculate_recall(y_pred, y_true)
+        f1_score = 2 * (precision * recall) / (precision + recall + 1e-8)
+        return f1_score
+
     def backward_pass(self, X: np.ndarray, y: np.ndarray, learning_rate: float) -> None:
         """Backward propagation"""
         W_l2_l3_T = self.parameters["W_l2_l3_T"]
@@ -113,23 +144,53 @@ class MyNeuralNetwork:
         self.parameters["b3"] -= learning_rate * d_b3
 
     def train(
-        self, X: np.ndarray, y: np.ndarray, learning_rate: float, epochs: int
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        learning_rate: float,
+        epochs: int,
+        X_test: np.ndarray = None,
+        y_test: np.ndarray = None,
     ) -> None:
-        """Train the neural network"""
+        """Train the neural network and print metrics like loss, accuracy, precision, recall, and F1 score"""
         for epoch in range(epochs):
-            y_pred, _, _, _, _, _ = self.forward_pass(X)
-            loss = self.binary_cross_entropy(y_pred, y)
+            y_pred_train, _, _, _, _, _ = self.forward_pass(X)
+            train_loss = self.binary_cross_entropy(y_pred_train, y)
+
             self.backward_pass(X, y, learning_rate)
+            train_accuracy = self.calculate_accuracy(y_pred_train, y)
+            train_precision = self.calculate_precision(y_pred_train, y)
+            train_recall = self.calculate_recall(y_pred_train, y)
+            train_f1_score = self.calculate_f1_score(y_pred_train, y)
+
+            # Optionally calculate and print test metrics if test data is provided
+            if X_test is not None and y_test is not None:
+                y_pred_test, _, _, _, _, _ = self.forward_pass(X_test)
+                test_loss = self.binary_cross_entropy(y_pred_test, y_test)
+                test_accuracy = self.calculate_accuracy(y_pred_test, y_test)
+                test_precision = self.calculate_precision(y_pred_test, y_test)
+                test_recall = self.calculate_recall(y_pred_test, y_test)
+                test_f1_score = self.calculate_f1_score(y_pred_test, y_test)
+            else:
+                test_loss = test_accuracy = test_precision = test_recall = (
+                    test_f1_score
+                ) = None
+
             if epoch % 10 == 0:
-                print(f"{MAGENTA}[Epoch {epoch}]:\n {RESET}   Train Loss: {loss:.4f}\n")
-
-        print(f"\n{GREEN}Final Weights and Biases after Training:{RESET}")
-        print("=" * 40)
-
-        for param_name, param_value in self.parameters.items():
-            print(
-                f"{MAGENTA}{param_name} of shape {param_value.shape}:{RESET}:\n{param_value}\n"
-            )
+                print(f"{MAGENTA}[Epoch {epoch}]:{RESET}")
+                print(
+                    f"{GREEN}   Train Loss: {RESET}{train_loss:.4f}   {CYAN}Train Accuracy: {RESET}{train_accuracy:.2f}%"
+                )
+                print(
+                    f"{CYAN}   Train Precision: {RESET}{train_precision:.4f}   {CYAN}Train Recall: {RESET}{train_recall:.4f}   {CYAN}Train F1: {RESET}{train_f1_score:.4f}"
+                )
+                if test_loss is not None:
+                    print(
+                        f"{GREEN}   Test Loss: {RESET}{test_loss:.4f}   {GREEN}Test Accuracy: {RESET}{test_accuracy:.2f}%"
+                    )
+                    print(
+                        f"{GREEN}   Test Precision: {RESET}{test_precision:.4f}   {GREEN}Test Recall: {RESET}{test_recall:.4f}   {CYAN}Test F1: {RESET}{test_f1_score:.4f}"
+                    )
 
     def save_model(self, file_path: str = "cached_model") -> None:
         """Save the model parameters to a file"""
@@ -144,12 +205,15 @@ class MyNeuralNetwork:
 
 class TumorDataset:
     @staticmethod
-    def load_dataset(data_path: str = "raw_data/tumor_dataset.csv") -> np.ndarray:
+    def load_dataset(
+        data_path: str = "data/preprocessed_cancer_data.csv", VERBOSE: bool = False
+    ) -> np.ndarray:
         """Load the brain tumor binary classification dataset from a csv file as a numpy array"""
         try:
             f = np.loadtxt(data_path, delimiter=",")
             f = f[1:]  # skip the header
-            print(f"{GREEN}Dataset loaded successfully{RESET}")
+            if VERBOSE:
+                print(f"{GREEN}Dataset loaded successfully{RESET}")
             return f
         except Exception as e:
             print(f"{RED}Error: {e}")
@@ -192,33 +256,46 @@ class TumorDataset:
 
         return X_train_normalized, X_test_normalized, y_train, y_test
 
+    @staticmethod
+    def get_sample_with_labels(
+        X_test, y_test, k=10, seed=19, with_labels: bool = False
+    ) -> np.ndarray:
+        """Get k random samples from X_test along with their true labels from y_test."""
+        if seed is not None:
+            np.random.seed(seed)
+        indices = np.random.choice(X_test.shape[0], size=k, replace=False)
+        if with_labels:
+            return X_test[indices], y_test[indices]
+        else:
+            return X_test[indices]
+
 
 def main():
     """Recap the whole pipeline"""
-    dataset = TumorDataset.load_dataset(data_path="raw_data/tumor_dataset.csv")
+    dataset = TumorDataset.load_dataset(data_path="data/preprocessed_cancer_data.csv")
     if dataset.size == 0:
         print(f"{RED}Error: Dataset not loaded")
         return
 
     X_train, X_test, y_train, y_test = TumorDataset.split_dataset(
-        dataset, test_size=0.2, verbose=False, save=False
+        dataset, test_size=0.2, verbose=True, save=True
     )
-    neural_net = MyNeuralNetwork(
-        INPUT_SIZE, HIDDEN_LAYER1_SIZE, HIDDEN_LAYER2_SIZE, OUTPUT_SIZE
-    )
-    neural_net.train(X_train, y_train, LEARNING_RATE, NUM_EPOCHS)
-    # neural_net.save_model('cached_model/trained_nn.pkl')
 
-    train_loss = neural_net.binary_cross_entropy(
-        neural_net.forward_pass(X_train)[0], y_train
+    nn = MyNeuralNetwork(
+        input_size=INPUT_SIZE,
+        hidden_size1=HIDDEN_LAYER1_SIZE,
+        hidden_size2=HIDDEN_LAYER2_SIZE,
+        output_size=OUTPUT_SIZE,
     )
-    test_loss = neural_net.binary_cross_entropy(
-        neural_net.forward_pass(X_test)[0], y_test
+    nn.train(
+        X_train,
+        y_train,
+        learning_rate=LEARNING_RATE,
+        epochs=NUM_EPOCHS,
+        X_test=X_test,
+        y_test=y_test,
     )
-    print(f"{MAGENTA}Training and Testing Losses:{RESET}")
-    print("=" * 28)
-    print(f"{GREEN} Training Loss:{RESET}   {train_loss:.4f}")
-    print(f"{GREEN} Testing Loss:{RESET}    {test_loss:.4f}")
+    nn.save_model(file_path="cached_model/trained_nn.pkl")
 
 
 if __name__ == "__main__":
